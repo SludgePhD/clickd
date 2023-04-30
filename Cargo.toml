@@ -1,0 +1,13 @@
+[package]
+name = "clickd"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+evdev = "0.12.1"
+anyhow = "1.0.70"
+rodio = { version = "0.17.1", features = ["wav"], default-features = false }
+serde = { version = "1.0.160", features = ["derive"] }
+toml = "0.7.3"
+ksni = "0.2.0"
+png = "0.17.8"

@@ -1,0 +1,20 @@
+# The `.wav` file to play on button presses. When omitted, the infamous "Windows Start Navigation"
+# *click* is played.
+audio = "assets/Windows Navigation Start.wav"
+
+# The volume to play the sound at. When omitted, the volume is not adjusted (ie. a volume of 1.0 is
+# used).
+volume = 3.0
+
+# The evdev "keys" to listen to. When omitted, only `BTN_LEFT` triggers the sound.
+# You can use `evtest` to get a list of available keys.
+buttons = [
+    "BTN_LEFT",
+    # forward/back navigation buttons
+    "BTN_FORWARD",
+    "BTN_BACK",
+]
+
+# Whether to show an icon in the systray. Clicking the icon toggles `clickd` on and off.
+# Default: true
+tray = true

@@ -1,0 +1,9 @@
+[Unit]
+Description=Windows Navigation Start.wav
+
+[Service]
+Type=exec
+ExecStart=/usr/local/bin/clickd ${HOME}/.config/clickd/config.toml
+
+[Install]
+WantedBy=default.target
