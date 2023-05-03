@@ -10,6 +10,7 @@ use serde::{
 
 #[derive(Deserialize)]
 pub struct Config {
+    devices: Option<Vec<String>>,
     audio: Option<PathBuf>,
     #[serde(default = "default_volume")]
     volume: f32,
@@ -29,6 +30,7 @@ fn default_tray() -> bool {
 impl Default for Config {
     fn default() -> Self {
         Self {
+            devices: None,
             audio: None,
             volume: default_volume(),
             buttons: None,
@@ -38,6 +40,10 @@ impl Default for Config {
 }
 
 impl Config {
+    pub fn devices(&self) -> Option<impl Iterator<Item = &str>> {
+        self.devices.as_ref().map(|devs| devs.iter().map(|s| &**s))
+    }
+
     pub fn audio_path(&self) -> Option<&Path> {
         self.audio.as_deref()
     }

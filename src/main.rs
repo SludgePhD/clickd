@@ -114,6 +114,12 @@ fn main() -> anyhow::Result<()> {
             continue;
         }
 
+        if let Some(mut devs) = config.devices() {
+            if !devs.any(|name| Some(name) == device.name()) {
+                continue;
+            }
+        }
+
         println!(
             "opening input device {}: {}",
             path.display(),
@@ -157,6 +163,11 @@ fn main() -> anyhow::Result<()> {
             // use a bunch of CPU, not this)
             thread::sleep(Duration::from_millis(50));
         }));
+    }
+
+    if threads.is_empty() {
+        eprintln!("no matching device found!");
+        process::exit(1);
     }
 
     // Wait for all listener threads to exit and do a worst-effort attempt at propagating panics.

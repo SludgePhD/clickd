@@ -1,3 +1,7 @@
+# The devices to open. An input device will only be opened when its name is in this list.
+# Default: absent (all devices will be opened)
+#devices = ["My Mouse"]
+
 # The `.wav` file to play on button presses. When omitted, the infamous "Windows Start Navigation"
 # *click* is played.
 audio = "assets/Windows Navigation Start.wav"
