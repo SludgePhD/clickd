@@ -154,7 +154,12 @@ fn main() -> anyhow::Result<()> {
                 if let InputEventKind::Key(key) = event.kind() {
                     if buttons.contains(&key) {
                         let source = sound.to_source();
-                        handle.play_raw(source).ok();
+                        if let Err(e) = handle.play_raw(source) {
+                            // We exit the whole process here since there is no easy way for the
+                            // main thread to block until _any_ of the worker threads exit.
+                            eprintln!("audio playback failed: {e}; exiting application.");
+                            process::exit(1);
+                        }
                     }
                 }
             }
