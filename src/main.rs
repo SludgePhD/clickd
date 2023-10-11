@@ -2,14 +2,23 @@ mod config;
 mod systray;
 
 use std::{
-    env, fs, io::Cursor, ops::Mul, panic::resume_unwind, path::Path, process, thread,
+    cmp, env, fs,
+    ops::Mul,
+    path::Path,
+    process,
+    sync::{Arc, Condvar, Mutex},
+    thread,
     time::Duration,
 };
 
 use anyhow::Context;
 use config::Config;
+use cpal::{
+    traits::{DeviceTrait, HostTrait, StreamTrait},
+    StreamConfig,
+};
 use evdev::{EventType, InputEventKind, Key};
-use rodio::{buffer::SamplesBuffer, Decoder, OutputStream, Source};
+use hound::WavReader;
 
 use crate::systray::SystrayIcon;
 
@@ -23,21 +32,29 @@ struct Sound {
 }
 
 impl Sound {
-    fn new(wav: Vec<u8>) -> anyhow::Result<Self> {
-        let decoder = Decoder::new_wav(Cursor::new(wav))?;
-        let channels = decoder.channels();
-        let sample_rate = decoder.sample_rate();
-        let samples = decoder.convert_samples().collect::<Vec<f32>>();
+    fn new(wav: &[u8]) -> anyhow::Result<Self> {
+        let mut decoder = WavReader::new(wav)?;
+        let spec = decoder.spec();
+        let channels = spec.channels;
+        let sample_rate = spec.sample_rate;
+        let samples = match spec.sample_format {
+            hound::SampleFormat::Float => {
+                decoder.samples::<f32>().collect::<Result<Vec<_>, _>>()?
+            }
+            hound::SampleFormat::Int => {
+                let max = (1 << spec.bits_per_sample) as f32 * 0.5;
+                decoder
+                    .samples::<i32>()
+                    .map(|res| res.map(|i| i as f32 / max))
+                    .collect::<Result<Vec<_>, _>>()?
+            }
+        };
 
         Ok(Sound {
             channels,
             sample_rate,
             samples,
         })
-    }
-
-    fn to_source(&self) -> SamplesBuffer<f32> {
-        SamplesBuffer::new(self.channels, self.sample_rate, self.samples.clone())
     }
 }
 
@@ -75,7 +92,18 @@ fn load_config() -> anyhow::Result<Config> {
 
 fn load_sound(path: &Path) -> anyhow::Result<Sound> {
     let wav = fs::read(path).with_context(|| path.display().to_string())?;
-    Sound::new(wav)
+    Sound::new(&wav)
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum State {
+    /// Initial state.
+    Idle,
+    /// Set by the input listener threads when a sound should be played.
+    Trigger,
+    Playing,
+    /// Set by the audio callback when the sound has finished.
+    Done,
 }
 
 fn main() -> anyhow::Result<()> {
@@ -90,11 +118,56 @@ fn main() -> anyhow::Result<()> {
             println!("opening audio file '{}'", path.display());
             load_sound(path)?
         }
-        None => Sound::new(DEFAULT_WAV.to_vec())?,
+        None => Sound::new(DEFAULT_WAV)?,
     };
     let sound = sound * config.volume();
 
-    let (_output_stream, handle) = OutputStream::try_default()?;
+    let signal = Arc::new((Mutex::new(State::Idle), Condvar::new()));
+
+    let host = cpal::default_host();
+    let Some(device) = host.default_output_device() else {
+        eprintln!("no default audio device found");
+        process::exit(1);
+    };
+    println!("using audio device: {}", device.name()?);
+    let mut offset = 0;
+    let output = device.build_output_stream::<f32, _, _>(
+        &StreamConfig {
+            channels: sound.channels,
+            buffer_size: cpal::BufferSize::Default,
+            sample_rate: cpal::SampleRate(sound.sample_rate),
+        },
+        {
+            let signal = signal.clone();
+            move |data, _| {
+                let mut guard = signal.0.lock().unwrap();
+                match *guard {
+                    State::Playing => {
+                        let len = cmp::min(data.len(), sound.samples.len() - offset);
+
+                        data.copy_from_slice(&sound.samples[offset..len]);
+                        data[len..].fill(0.0);
+
+                        offset += len;
+                        offset = offset.max(sound.samples.len());
+
+                        if offset == sound.samples.len() {
+                            offset = 0;
+                            *guard = State::Done;
+                            signal.1.notify_one();
+                        }
+                    }
+                    _ => data.fill(0.0),
+                }
+            }
+        },
+        |error| {
+            eprintln!("playback error: {}; exiting.", error);
+            process::exit(1);
+        },
+        None,
+    )?;
+    output.play()?;
 
     let systray = if config.tray() {
         Some(SystrayIcon::new()?)
@@ -126,10 +199,8 @@ fn main() -> anyhow::Result<()> {
             device.name().unwrap(),
         );
 
-        let handle = handle.clone();
-        let sound = sound.clone();
+        let signal = signal.clone();
         let buttons = buttons.clone();
-        let systray = systray.clone();
         threads.push(thread::spawn(move || loop {
             let events = match device.fetch_events() {
                 Ok(events) => events,
@@ -145,21 +216,14 @@ fn main() -> anyhow::Result<()> {
                     continue;
                 }
 
-                if let Some(tray) = &systray {
-                    if !tray.service_enabled() {
-                        continue;
-                    }
-                }
-
                 if let InputEventKind::Key(key) = event.kind() {
                     if buttons.contains(&key) {
-                        let source = sound.to_source();
-                        if let Err(e) = handle.play_raw(source) {
-                            // We exit the whole process here since there is no easy way for the
-                            // main thread to block until _any_ of the worker threads exit.
-                            eprintln!("audio playback failed: {e}; exiting application.");
-                            process::exit(1);
+                        let mut guard = signal.0.lock().unwrap();
+                        if *guard == State::Idle {
+                            *guard = State::Trigger;
                         }
+                        signal.1.notify_one();
+                        drop(guard);
                     }
                 }
             }
@@ -175,12 +239,23 @@ fn main() -> anyhow::Result<()> {
         process::exit(1);
     }
 
-    // Wait for all listener threads to exit and do a worst-effort attempt at propagating panics.
-    for thread in threads {
-        if let Err(e) = thread.join() {
-            resume_unwind(e);
+    loop {
+        let mut guard = signal.1.wait(signal.0.lock().unwrap()).unwrap();
+        match *guard {
+            State::Idle | State::Playing => {}
+            State::Trigger => {
+                if let Some(tray) = &systray {
+                    if !tray.service_enabled() {
+                        *guard = State::Idle;
+                        continue;
+                    }
+                }
+
+                *guard = State::Playing;
+            }
+            State::Done => {
+                *guard = State::Idle;
+            }
         }
     }
-
-    Ok(())
 }
