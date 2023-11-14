@@ -235,7 +235,7 @@ fn main() -> anyhow::Result<()> {
     }
 
     if threads.is_empty() {
-        eprintln!("no matching device found!");
+        eprintln!("no matching input device found!");
         process::exit(1);
     }
 
