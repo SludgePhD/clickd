@@ -1,15 +1,7 @@
 mod config;
 mod systray;
 
-use std::{
-    cmp, env, fs,
-    ops::Mul,
-    path::Path,
-    process,
-    sync::{Arc, Condvar, Mutex},
-    thread,
-    time::Duration,
-};
+use std::{cmp, env, fs, ops::Mul, path::Path, process, sync::mpsc, thread, time::Duration};
 
 use anyhow::Context;
 use config::Config;
@@ -17,7 +9,11 @@ use cpal::{
     traits::{DeviceTrait, HostTrait, StreamTrait},
     StreamConfig,
 };
-use evdev::{EventType, InputEventKind, Key};
+use evdevil::{
+    bits::BitSet,
+    event::{EventKind, EventType, Key, KeyState},
+    hotplug,
+};
 use hound::WavReader;
 
 use crate::systray::SystrayIcon;
@@ -95,17 +91,6 @@ fn load_sound(path: &Path) -> anyhow::Result<Sound> {
     Sound::new(&wav)
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum State {
-    /// Initial state.
-    Idle,
-    /// Set by the input listener threads when a sound should be played.
-    Trigger,
-    Playing,
-    /// Set by the audio callback when the sound has finished.
-    Done,
-}
-
 fn main() -> anyhow::Result<()> {
     let config = load_config()?;
     let buttons = match config.buttons() {
@@ -122,7 +107,7 @@ fn main() -> anyhow::Result<()> {
     };
     let sound = sound * config.volume();
 
-    let signal = Arc::new((Mutex::new(State::Idle), Condvar::new()));
+    let (sender, recv) = mpsc::sync_channel(1);
 
     let host = cpal::default_host();
     let Some(device) = host.default_output_device() else {
@@ -138,26 +123,21 @@ fn main() -> anyhow::Result<()> {
             sample_rate: cpal::SampleRate(sound.sample_rate),
         },
         {
-            let signal = signal.clone();
             move |data, _| {
-                let mut guard = signal.0.lock().unwrap();
-                match *guard {
-                    State::Playing => {
-                        let len = cmp::min(data.len(), sound.samples.len() - offset);
+                if offset != 0 || recv.try_recv().is_ok() {
+                    let len = cmp::min(data.len(), sound.samples.len() - offset);
 
-                        data.copy_from_slice(&sound.samples[offset..len]);
-                        data[len..].fill(0.0);
+                    data.copy_from_slice(&sound.samples[offset..len]);
+                    data[len..].fill(0.0);
 
-                        offset += len;
-                        offset = offset.max(sound.samples.len());
+                    offset += len;
+                    offset = offset.max(sound.samples.len());
 
-                        if offset == sound.samples.len() {
-                            offset = 0;
-                            *guard = State::Done;
-                            signal.1.notify_one();
-                        }
+                    if offset == sound.samples.len() {
+                        offset = 0;
                     }
-                    _ => data.fill(0.0),
+                } else {
+                    data.fill(0.0);
                 }
             }
         },
@@ -177,53 +157,58 @@ fn main() -> anyhow::Result<()> {
 
     let mut threads = Vec::new();
 
-    for (path, mut device) in evdev::enumerate() {
-        if !device.supported_events().contains(EventType::KEY) {
+    for res in hotplug::enumerate()? {
+        let device = res?;
+        if !device.supported_events()?.contains(EventType::KEY) {
             continue;
         }
 
-        let keys = device.supported_keys().unwrap();
+        let keys = device.supported_keys()?;
         if !buttons.iter().any(|key| keys.contains(*key)) {
             continue;
         }
 
+        let devname = device.name()?;
         if let Some(mut devs) = config.devices() {
-            if !devs.any(|name| Some(name) == device.name()) {
+            if !devs.any(|d| d == &*devname) {
                 continue;
             }
         }
 
+        let path = device.path().unwrap().to_path_buf();
         println!(
             "opening input device {}: {}",
             path.display(),
             device.name().unwrap(),
         );
 
-        let signal = signal.clone();
+        // We only care about key/button presses, don't wake us for every mouse movement.
+        device.set_event_mask(&BitSet::from_iter([EventType::KEY]))?;
+
+        let mut reader = device.into_reader()?;
         let buttons = buttons.clone();
+        let sender = sender.clone();
+        let systray = systray.clone();
         threads.push(thread::spawn(move || loop {
-            let events = match device.fetch_events() {
-                Ok(events) => events,
-                Err(e) => {
-                    eprintln!("ERROR: {e}; closing {}", path.display());
-                    return;
-                }
-            };
+            for res in &mut reader {
+                let ev = match res {
+                    Ok(ev) => ev,
+                    Err(e) => {
+                        eprintln!("ERROR: {e}; closing {}", path.display());
+                        return;
+                    }
+                };
 
-            for event in events {
-                if event.value() != 1 {
-                    // Only react to key down events.
-                    continue;
-                }
+                if let Some(EventKind::Key(ev)) = ev.kind() {
+                    if ev.state() == KeyState::PRESSED && buttons.contains(&ev.key()) {
+                        let should_play = match &systray {
+                            None => true,
+                            Some(systray) => systray.service_enabled(),
+                        };
 
-                if let InputEventKind::Key(key) = event.kind() {
-                    if buttons.contains(&key) {
-                        let mut guard = signal.0.lock().unwrap();
-                        if *guard == State::Idle {
-                            *guard = State::Trigger;
+                        if should_play {
+                            sender.try_send(()).ok();
                         }
-                        signal.1.notify_one();
-                        drop(guard);
                     }
                 }
             }
@@ -234,28 +219,5 @@ fn main() -> anyhow::Result<()> {
         }));
     }
 
-    if threads.is_empty() {
-        eprintln!("no matching input device found!");
-        process::exit(1);
-    }
-
-    loop {
-        let mut guard = signal.1.wait(signal.0.lock().unwrap()).unwrap();
-        match *guard {
-            State::Idle | State::Playing => {}
-            State::Trigger => {
-                if let Some(tray) = &systray {
-                    if !tray.service_enabled() {
-                        *guard = State::Idle;
-                        continue;
-                    }
-                }
-
-                *guard = State::Playing;
-            }
-            State::Done => {
-                *guard = State::Idle;
-            }
-        }
-    }
+    Ok(())
 }

@@ -4,7 +4,6 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-evdev = "0.12.1"
 anyhow = "1.0.70"
 cpal = "0.15.2"
 hound = "3.5.1"
@@ -12,3 +11,4 @@ serde = { version = "1.0.160", features = ["derive"] }
 toml = "0.8.22"
 ksni = "0.2.0" # (not at 0.3 because zbus is a far more frustrating dependency than dbus)
 png = "0.17.8"
+evdevil = "0.1.0"

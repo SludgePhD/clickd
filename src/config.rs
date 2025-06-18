@@ -3,6 +3,7 @@ use std::{
     path::{Path, PathBuf},
 };
 
+use evdevil::event::Key;
 use serde::{
     de::{Error, Unexpected, Visitor},
     Deserialize, Deserializer,
@@ -14,7 +15,7 @@ pub struct Config {
     audio: Option<PathBuf>,
     #[serde(default = "default_volume")]
     volume: f32,
-    buttons: Option<Vec<Key>>,
+    buttons: Option<Vec<KeyName>>,
     #[serde(default = "default_tray")]
     tray: bool,
 }
@@ -52,7 +53,7 @@ impl Config {
         self.volume
     }
 
-    pub fn buttons(&self) -> Option<impl Iterator<Item = evdev::Key> + '_> {
+    pub fn buttons(&self) -> Option<impl Iterator<Item = Key> + '_> {
         self.buttons.as_ref().map(|v| v.iter().map(|key| key.0))
     }
 
@@ -61,16 +62,16 @@ impl Config {
     }
 }
 
-struct Key(evdev::Key);
+struct KeyName(Key);
 
-impl<'de> Deserialize<'de> for Key {
+impl<'de> Deserialize<'de> for KeyName {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where
         D: Deserializer<'de>,
     {
         struct KeyVisitor;
         impl<'de> Visitor<'de> for KeyVisitor {
-            type Value = Key;
+            type Value = KeyName;
 
             fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
                 formatter.write_str("evdev `Key` enum value")
@@ -81,9 +82,9 @@ impl<'de> Deserialize<'de> for Key {
                 E: Error,
             {
                 let key = v
-                    .parse::<evdev::Key>()
+                    .parse::<Key>()
                     .map_err(|_| E::invalid_value(Unexpected::Str(v), &self))?;
-                Ok(Key(key))
+                Ok(KeyName(key))
             }
         }
 

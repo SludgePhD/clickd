@@ -81,7 +81,7 @@ impl Tray for TrayImpl {
         self.enabled.fetch_xor(true, Ordering::Relaxed);
     }
 
-    fn icon_pixmap(&self) -> Vec<ksni::Icon> {
+    fn icon_pixmap(&self) -> Vec<Icon> {
         if self.enabled.load(Ordering::Relaxed) {
             vec![self.icon_enabled.clone()]
         } else {
