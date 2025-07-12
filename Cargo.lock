@@ -241,9 +241,9 @@ checksum = "877a4ace8713b0bcf2a4e7eec82529c029f1d0619886d18145fea96c3ffe5c0f"
 
 [[package]]
 name = "evdevil"
-version = "0.1.2"
+version = "0.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "de686eb18bfbefb8ae5da54b4f9fa728710d887525897cdf1dedea48c66a5ab9"
+checksum = "7af9c12d84b1408a8228d3a2db89028e415947996a3075081551ec47019ff76d"
 dependencies = [
  "libc",
  "linux-ioctl",

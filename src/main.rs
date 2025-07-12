@@ -175,7 +175,7 @@ fn main() -> anyhow::Result<()> {
             }
         }
 
-        let path = device.path().unwrap().to_path_buf();
+        let path = device.path().to_path_buf();
         println!(
             "opening input device {}: {}",
             path.display(),
@@ -199,7 +199,7 @@ fn main() -> anyhow::Result<()> {
                     }
                 };
 
-                if let Some(EventKind::Key(ev)) = ev.kind() {
+                if let EventKind::Key(ev) = ev.kind() {
                     if ev.state() == KeyState::PRESSED && buttons.contains(&ev.key()) {
                         let should_play = match &systray {
                             None => true,
