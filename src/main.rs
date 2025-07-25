@@ -12,7 +12,6 @@ use cpal::{
 use evdevil::{
     bits::BitSet,
     event::{EventKind, EventType, Key, KeyState},
-    hotplug,
 };
 use hound::WavReader;
 
@@ -157,8 +156,14 @@ fn main() -> anyhow::Result<()> {
 
     let mut threads = Vec::new();
 
-    for res in hotplug::enumerate()? {
-        let device = res?;
+    for res in evdevil::enumerate_hotplug()? {
+        let device = match res {
+            Ok(dev) => dev,
+            Err(e) => {
+                eprintln!("couldn't open device: {e}");
+                continue;
+            }
+        };
         if !device.supported_events()?.contains(EventType::KEY) {
             continue;
         }

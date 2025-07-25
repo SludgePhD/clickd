@@ -241,14 +241,14 @@ checksum = "877a4ace8713b0bcf2a4e7eec82529c029f1d0619886d18145fea96c3ffe5c0f"
 
 [[package]]
 name = "evdevil"
-version = "0.2.1"
+version = "0.3.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7af9c12d84b1408a8228d3a2db89028e415947996a3075081551ec47019ff76d"
+checksum = "fed270fda7007816c3d6a6430e9c0fdb80be0af4832d2bda8c03053a6a7169da"
 dependencies = [
  "libc",
- "linux-ioctl",
  "log",
  "serde",
+ "uoctl",
 ]
 
 [[package]]
@@ -357,15 +357,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "06085512b750d640299b79be4bad3d2fa90a9c00b1fd9e1b46364f66f0485c72"
 dependencies = [
  "pkg-config",
-]
-
-[[package]]
-name = "linux-ioctl"
-version = "0.2.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d21b9069801ea0ceb4181430bd1de6a5dc0f564bb12fecfa9be970e89c5e0d0a"
-dependencies = [
- "libc",
 ]
 
 [[package]]
@@ -753,6 +744,15 @@ name = "unicode-width"
 version = "0.1.10"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c0edd1e5b14653f783770bce4a4dabb4a5108a5370a5f5d8cfe8710c361f6c8b"
+
+[[package]]
+name = "uoctl"
+version = "1.0.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "82a1984060a018034bd16642b1c25a2178cf211c3930abb0099f01e995b38eeb"
+dependencies = [
+ "libc",
+]
 
 [[package]]
 name = "vec_map"
