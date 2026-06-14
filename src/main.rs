@@ -105,6 +105,7 @@ fn main() -> anyhow::Result<()> {
         None => Sound::new(DEFAULT_WAV)?,
     };
     let sound = sound * config.volume();
+    println!("audio file has {} samples", sound.samples.len());
 
     let (sender, recv) = mpsc::sync_channel(1);
 
@@ -113,36 +114,45 @@ fn main() -> anyhow::Result<()> {
         eprintln!("no default audio device found");
         process::exit(1);
     };
-    println!("using audio device: {}", device.name()?);
+    println!(
+        "using audio device: {} ({})",
+        device.description()?,
+        device.id()?
+    );
     let mut offset = 0;
     let output = device.build_output_stream::<f32, _, _>(
-        &StreamConfig {
+        StreamConfig {
             channels: sound.channels,
             buffer_size: cpal::BufferSize::Default,
-            sample_rate: cpal::SampleRate(sound.sample_rate),
+            sample_rate: sound.sample_rate,
         },
-        {
-            move |data, _| {
-                if offset != 0 || recv.try_recv().is_ok() {
-                    let len = cmp::min(data.len(), sound.samples.len() - offset);
+        move |data, _info| {
+            if offset != 0 || recv.try_recv().is_ok() {
+                let len = cmp::min(data.len(), sound.samples.len() - offset);
 
-                    data.copy_from_slice(&sound.samples[offset..len]);
-                    data[len..].fill(0.0);
+                data[..len].copy_from_slice(&sound.samples[offset..offset + len]);
+                data[len..].fill(0.0);
 
-                    offset += len;
-                    offset = offset.max(sound.samples.len());
+                offset += len;
+                offset = offset.min(sound.samples.len());
 
-                    if offset == sound.samples.len() {
-                        offset = 0;
-                    }
-                } else {
-                    data.fill(0.0);
+                if offset == sound.samples.len() {
+                    offset = 0;
                 }
+            } else {
+                data.fill(0.0);
             }
         },
-        |error| {
-            eprintln!("playback error: {}; exiting.", error);
-            process::exit(1);
+        |error| match error.kind() {
+            cpal::ErrorKind::Xrun
+            | cpal::ErrorKind::DeviceChanged
+            | cpal::ErrorKind::RealtimeDenied => {
+                eprintln!("{error}");
+            }
+            _ => {
+                eprintln!("playback error: {}; exiting.", error);
+                process::exit(1);
+            }
         },
         None,
     )?;
