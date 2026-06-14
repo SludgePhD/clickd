@@ -1,6 +1,9 @@
-use std::sync::{
-    atomic::{AtomicBool, Ordering},
-    Arc,
+use std::{
+    io::Cursor,
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        Arc,
+    },
 };
 
 use ksni::{Icon, Tray, TrayService};
@@ -34,7 +37,7 @@ impl SystrayIcon {
 }
 
 fn decode_png(png: &[u8]) -> Icon {
-    let decoder = png::Decoder::new(png);
+    let decoder = png::Decoder::new(Cursor::new(png));
     let mut reader = decoder.read_info().unwrap();
     assert_eq!(
         reader.output_color_type(),

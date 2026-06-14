@@ -167,8 +167,8 @@ fn main() -> anyhow::Result<()> {
     let mut threads = Vec::new();
 
     for res in evdevil::enumerate_hotplug()? {
-        let device = match res {
-            Ok(dev) => dev,
+        let (path, device) = match res {
+            Ok((path, dev)) => (path, dev),
             Err(e) => {
                 eprintln!("couldn't open device: {e}");
                 continue;
@@ -190,7 +190,6 @@ fn main() -> anyhow::Result<()> {
             }
         }
 
-        let path = device.path().to_path_buf();
         println!(
             "opening input device {}: {}",
             path.display(),
