@@ -3,7 +3,7 @@ mod systray;
 
 use std::{cmp, env, fs, ops::Mul, path::Path, process, sync::mpsc, thread, time::Duration};
 
-use anyhow::Context;
+use anyhow::{anyhow, Context};
 use config::Config;
 use cpal::{
     traits::{DeviceTrait, HostTrait, StreamTrait},
@@ -14,6 +14,7 @@ use evdevil::{
     event::{EventKind, EventType, Key, KeyState},
 };
 use hound::WavReader;
+use resampler::ResamplerFft;
 
 use crate::systray::SystrayIcon;
 
@@ -22,7 +23,7 @@ static DEFAULT_WAV: &[u8] = include_bytes!("../assets/Windows Navigation Start.w
 #[derive(Clone)]
 struct Sound {
     channels: u16,
-    sample_rate: u32,
+    sample_rate: resampler::SampleRate,
     samples: Vec<f32>,
 }
 
@@ -31,7 +32,8 @@ impl Sound {
         let mut decoder = WavReader::new(wav)?;
         let spec = decoder.spec();
         let channels = spec.channels;
-        let sample_rate = spec.sample_rate;
+        let sample_rate = resampler::SampleRate::try_from(spec.sample_rate)
+            .map_err(|_| anyhow!("unsupported sample rate {}", spec.sample_rate))?;
         let samples = match spec.sample_format {
             hound::SampleFormat::Float => {
                 decoder.samples::<f32>().collect::<Result<Vec<_>, _>>()?
@@ -50,6 +52,10 @@ impl Sound {
             sample_rate,
             samples,
         })
+    }
+
+    fn sample_rate(&self) -> u32 {
+        self.sample_rate.into()
     }
 }
 
@@ -104,8 +110,12 @@ fn main() -> anyhow::Result<()> {
         }
         None => Sound::new(DEFAULT_WAV)?,
     };
-    let sound = sound * config.volume();
-    println!("audio file has {} samples", sound.samples.len());
+    let mut sound = sound * config.volume();
+    println!(
+        "audio file has {} samples, {} channels",
+        sound.samples.len(),
+        sound.channels,
+    );
 
     let (sender, recv) = mpsc::sync_channel(1);
 
@@ -119,12 +129,46 @@ fn main() -> anyhow::Result<()> {
         device.description()?,
         device.id()?
     );
+
+    let stream_config = device.default_output_config()?;
+    let native_rate = resampler::SampleRate::try_from(stream_config.sample_rate())
+        .map_err(|_| anyhow!("unsupported sample rate {}", stream_config.sample_rate()))?;
+    if stream_config.sample_rate() != sound.sample_rate() {
+        println!(
+            "resampling sound from {} Hz to {} Hz sample rate",
+            sound.sample_rate(),
+            stream_config.sample_rate()
+        );
+
+        let mut s = ResamplerFft::new(sound.channels as usize, sound.sample_rate, native_rate);
+
+        let out_samples = (sound.samples.len() * stream_config.sample_rate() as usize)
+            .div_ceil(sound.sample_rate() as usize)
+            .next_multiple_of(s.chunk_size_output());
+        let mut out = vec![0.0; out_samples];
+
+        sound.samples.resize(
+            sound.samples.len().next_multiple_of(s.chunk_size_input()),
+            0.0,
+        );
+        let inchunk = s.chunk_size_input();
+        let outchunk = s.chunk_size_output();
+        for i in 0..sound.samples.len() / inchunk {
+            s.resample(
+                &sound.samples[i * inchunk..(i + 1) * inchunk],
+                &mut out[i * outchunk..(i + 1) * outchunk],
+            )?;
+        }
+
+        sound.samples = out;
+        sound.sample_rate = native_rate;
+    }
+
     let mut offset = 0;
     let output = device.build_output_stream::<f32, _, _>(
         StreamConfig {
             channels: sound.channels,
-            buffer_size: cpal::BufferSize::Default,
-            sample_rate: sound.sample_rate,
+            ..stream_config.config()
         },
         move |data, _info| {
             if offset != 0 || recv.try_recv().is_ok() {
