@@ -8,7 +8,7 @@ anyhow = "1.0.70"
 cpal = { version = "0.18.1", features = ["pipewire"] }
 hound = "3.5.1"
 serde = { version = "1.0.160", features = ["derive"] }
-toml = "1.1.2"
+toml = { version = "1.1.2", default-features = false, features = ["serde", "parse"] }
 ksni = "0.2.0" # (not at 0.3 because zbus is a far more frustrating dependency than dbus)
 png = "0.18.1"
 evdevil = { version = "0.4.3", features = ["serde"] }
