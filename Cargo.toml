@@ -16,4 +16,4 @@ toml = { version = "1.1.2", default-features = false, features = ["serde", "pars
 ksni = "0.2.0" # (not at 0.3 because zbus is a far more frustrating dependency than dbus)
 png = "0.18.1"
 
-evdevil = { version = "0.4.3", features = ["serde"] }
+evdevil = { version = "0.5.0", default-features = false, features = ["serde"] }

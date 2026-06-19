@@ -356,13 +356,12 @@ dependencies = [
 
 [[package]]
 name = "evdevil"
-version = "0.4.3"
+version = "0.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "fd59ac3a6f520623b5544b791923eb9412da9dd076697a804ed7076c47540da9"
+checksum = "d9c643614ef96f3638548743f7d04cd94b0290146bf5d95f3838e0876379cb05"
 dependencies = [
  "libc",
- "log",
- "serde",
+ "serde_core",
  "uoctl",
 ]
 
